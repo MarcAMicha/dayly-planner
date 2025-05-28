@@ -247,7 +247,7 @@ const Navigation = () => {
 
 // Dashboard Component
 const Dashboard = () => {
-  const { user, events, familyMembers, selectedMember, selectedDate, loadEvents } = useFamilyContext();
+  const { user, events, familyMembers, selectedMember, selectedDate, setSelectedDate, loadEvents } = useFamilyContext();
   const [showEventModal, setShowEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [stats, setStats] = useState(null);
