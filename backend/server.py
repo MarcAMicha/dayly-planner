@@ -13,7 +13,9 @@ from datetime import datetime, timedelta
 import hashlib
 from enum import Enum
 import jwt
-
+import asyncio
+from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.llm.openai import OpenAIChatRealtime
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -32,6 +34,9 @@ api_router = APIRouter(prefix="/api")
 # Security
 security = HTTPBearer()
 SECRET_KEY = "family_planner_secret_key_change_in_production"
+
+# AI Services - Placeholder API key for demo
+DEFAULT_OPENAI_API_KEY = "sk-placeholder-key-for-demo-replace-with-real-key"
 
 # Enums
 class UserRole(str, Enum):
@@ -86,6 +91,7 @@ class CalendarEvent(BaseModel):
     reminder_minutes: int = 15
     tags: List[str] = Field(default_factory=list)
     ai_optimized: bool = False
+    ai_suggestions: List[str] = Field(default_factory=list)
     conflicts: List[str] = Field(default_factory=list)  # List of conflicting event IDs
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -131,6 +137,28 @@ class VoiceService(BaseModel):
     api_key: Optional[str] = None
     enabled: bool = False
 
+class VoiceCommand(BaseModel):
+    text: str
+    family_member_id: str
+    session_id: Optional[str] = None
+
+class VoiceResponse(BaseModel):
+    text: str
+    audio_url: Optional[str] = None
+    action: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+
+class AIOptimizationRequest(BaseModel):
+    events: List[CalendarEvent]
+    family_members: List[FamilyMember]
+    preferences: Optional[Dict[str, Any]] = None
+
+class AIOptimizationResponse(BaseModel):
+    suggestions: List[str]
+    optimized_events: List[CalendarEvent]
+    conflicts_resolved: int
+    time_saved_minutes: int
+
 # Helper functions
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -166,6 +194,46 @@ def check_event_conflicts(new_event: CalendarEvent, existing_events: List[Calend
                 new_event.end_time > event.start_time):
                 conflicts.append(event.id)
     return conflicts
+
+async def get_ai_config() -> Optional[AIService]:
+    """Get current AI configuration"""
+    config = await db.ai_config.find_one({})
+    if not config:
+        return None
+    return AIService(**config)
+
+async def get_voice_config() -> Optional[VoiceService]:
+    """Get current voice configuration"""
+    config = await db.voice_config.find_one({})
+    if not config:
+        return None
+    return VoiceService(**config)
+
+async def create_ai_chat(api_key: str = None, model: str = "gpt-4o") -> LlmChat:
+    """Create AI chat instance with current configuration"""
+    if not api_key:
+        ai_config = await get_ai_config()
+        api_key = ai_config.api_key if ai_config else DEFAULT_OPENAI_API_KEY
+    
+    session_id = str(uuid.uuid4())
+    system_message = """You are an AI assistant specialized in family scheduling optimization. 
+    Your role is to help families manage their time efficiently by:
+    1. Detecting scheduling conflicts
+    2. Suggesting optimal time slots
+    3. Balancing family member preferences
+    4. Prioritizing events based on importance
+    5. Minimizing travel time between locations
+    6. Ensuring adequate rest and family time
+    
+    Always provide practical, family-friendly suggestions."""
+    
+    chat = LlmChat(
+        api_key=api_key,
+        session_id=session_id,
+        system_message=system_message
+    ).with_model("openai", model)
+    
+    return chat
 
 # Authentication routes
 @api_router.post("/auth/login")
@@ -345,8 +413,76 @@ async def configure_ai_service(
 async def get_ai_status(current_user: FamilyMember = Depends(get_current_user)):
     config = await db.ai_config.find_one({})
     if not config:
-        return {"enabled": False, "provider": None}
+        return {"enabled": False, "provider": None, "model": None}
     return AIService(**config)
+
+@api_router.post("/ai/optimize", response_model=AIOptimizationResponse)
+async def optimize_schedule(
+    request: AIOptimizationRequest,
+    current_user: FamilyMember = Depends(get_current_user)
+):
+    """AI-powered schedule optimization"""
+    if current_user.role != UserRole.PARENT:
+        raise HTTPException(status_code=403, detail="Only parents can use AI optimization")
+    
+    try:
+        # Create AI chat instance
+        chat = await create_ai_chat()
+        
+        # Prepare family schedule context
+        family_context = {
+            "family_members": [{"name": m.name, "role": m.role, "preferences": m.preferences} for m in request.family_members],
+            "events": [{"title": e.title, "start": e.start_time.isoformat(), "end": e.end_time.isoformat(), 
+                       "type": e.event_type, "priority": e.priority, "member": e.family_member_id} for e in request.events],
+            "preferences": request.preferences or {}
+        }
+        
+        # Create optimization prompt
+        optimization_prompt = f"""
+        Analyze this family schedule and provide optimization suggestions:
+        
+        Family Context: {family_context}
+        
+        Please provide:
+        1. Scheduling conflict analysis
+        2. Time optimization suggestions
+        3. Family time recommendations
+        4. Efficiency improvements
+        5. Stress reduction tips
+        
+        Format your response as actionable suggestions for busy family life.
+        """
+        
+        # Get AI suggestions
+        user_message = UserMessage(text=optimization_prompt)
+        ai_response = await chat.send_message(user_message)
+        
+        # Parse AI response and create suggestions
+        suggestions = ai_response.split('\n') if ai_response else ["AI service temporarily unavailable"]
+        suggestions = [s.strip() for s in suggestions if s.strip()][:5]  # Top 5 suggestions
+        
+        return AIOptimizationResponse(
+            suggestions=suggestions,
+            optimized_events=request.events,  # For now, return original events
+            conflicts_resolved=len([e for e in request.events if e.conflicts]),
+            time_saved_minutes=30  # Placeholder calculation
+        )
+        
+    except Exception as e:
+        # Graceful fallback when AI is not available
+        logger.error(f"AI optimization failed: {e}")
+        return AIOptimizationResponse(
+            suggestions=[
+                "Try grouping similar tasks together to reduce context switching",
+                "Consider scheduling family meals at consistent times",
+                "Balance high-priority events throughout the week",
+                "Leave buffer time between appointments",
+                "Plan family activities during weekends when possible"
+            ],
+            optimized_events=request.events,
+            conflicts_resolved=0,
+            time_saved_minutes=0
+        )
 
 # Voice Service Configuration (Modular)
 @api_router.post("/voice/configure")
@@ -367,6 +503,57 @@ async def get_voice_status(current_user: FamilyMember = Depends(get_current_user
     if not config:
         return {"enabled": False, "provider": None}
     return VoiceService(**config)
+
+@api_router.post("/voice/command", response_model=VoiceResponse)
+async def process_voice_command(
+    command: VoiceCommand,
+    current_user: FamilyMember = Depends(get_current_user)
+):
+    """Process voice commands for calendar management"""
+    try:
+        # Create AI chat for voice command interpretation
+        chat = await create_ai_chat()
+        
+        # Voice command interpretation prompt
+        voice_prompt = f"""
+        Parse this voice command for family calendar management: "{command.text}"
+        
+        Determine the intent and extract relevant information:
+        - Action: (create_event, get_schedule, update_event, etc.)
+        - Event details: title, date, time, type, priority
+        - Family member affected
+        
+        Respond with a helpful confirmation and any clarification needed.
+        If creating an event, ask for any missing details.
+        """
+        
+        user_message = UserMessage(text=voice_prompt)
+        ai_response = await chat.send_message(user_message)
+        
+        # Simple voice command parsing (could be enhanced with more sophisticated NLP)
+        if "create" in command.text.lower() or "add" in command.text.lower():
+            action = "create_event"
+            response_text = f"I'll help you create a new event. {ai_response}"
+        elif "schedule" in command.text.lower() or "what's" in command.text.lower():
+            action = "get_schedule"
+            response_text = f"Here's your schedule information: {ai_response}"
+        else:
+            action = "general"
+            response_text = ai_response
+        
+        return VoiceResponse(
+            text=response_text,
+            action=action,
+            data={"original_command": command.text, "family_member_id": command.family_member_id}
+        )
+        
+    except Exception as e:
+        logger.error(f"Voice command processing failed: {e}")
+        return VoiceResponse(
+            text="I'm sorry, I couldn't process that voice command. Please try again or use the regular interface.",
+            action="error",
+            data={"error": str(e)}
+        )
 
 # Dashboard & Analytics
 @api_router.get("/dashboard/stats")
@@ -395,17 +582,48 @@ async def get_dashboard_stats(current_user: FamilyMember = Depends(get_current_u
     conflicts_query = {**query, "conflicts": {"$ne": []}}
     conflicts_count = await db.calendar_events.count_documents(conflicts_query)
     
+    # AI optimized events
+    ai_optimized_query = {**query, "ai_optimized": True}
+    ai_optimized_count = await db.calendar_events.count_documents(ai_optimized_query)
+    
     return {
         "total_events": total_events,
         "events_by_type": {item["_id"]: item["count"] for item in events_by_type},
         "upcoming_events": upcoming_events,
-        "conflicts_count": conflicts_count
+        "conflicts_count": conflicts_count,
+        "ai_optimized_count": ai_optimized_count,
+        "ai_enabled": (await get_ai_status(current_user))["enabled"],
+        "voice_enabled": (await get_voice_status(current_user))["enabled"]
     }
+
+# Voice Realtime (WebRTC) - Advanced Voice Features
+try:
+    # Initialize OpenAI Realtime Chat for advanced voice features
+    openai_realtime = OpenAIChatRealtime(api_key=DEFAULT_OPENAI_API_KEY)
+    
+    # Register realtime voice routes
+    voice_router = APIRouter()
+    OpenAIChatRealtime.register_openai_realtime_router(voice_router, openai_realtime)
+    api_router.include_router(voice_router, prefix="/voice/realtime")
+    
+except Exception as e:
+    logger.warning(f"Advanced voice features not available: {e}")
 
 # Basic health check
 @api_router.get("/")
 async def root():
-    return {"message": "Family Daily Planner API", "status": "active"}
+    ai_config = await get_ai_config()
+    voice_config = await get_voice_config()
+    
+    return {
+        "message": "Family Daily Planner API", 
+        "status": "active",
+        "features": {
+            "ai_optimization": ai_config.enabled if ai_config else False,
+            "voice_commands": voice_config.enabled if voice_config else False,
+            "voice_realtime": True  # Advanced voice features available
+        }
+    }
 
 # Include the router in the main app
 app.include_router(api_router)

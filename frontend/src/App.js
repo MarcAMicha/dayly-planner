@@ -2,6 +2,13 @@ import React, { useState, useEffect, createContext, useContext } from "react";
 import "./App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import axios from "axios";
+import { 
+  AIConfigurationModal, 
+  VoiceConfigurationModal, 
+  VoiceCommandInterface, 
+  AIOptimizationPanel,
+  EnhancedStatsCard 
+} from "./components";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -10,7 +17,7 @@ const API = `${BACKEND_URL}/api`;
 const FamilyContext = createContext();
 
 // Custom hook to use family context
-const useFamilyContext = () => {
+export const useFamilyContext = () => {
   const context = useContext(FamilyContext);
   if (!context) {
     throw new Error('useFamilyContext must be used within FamilyProvider');
@@ -183,7 +190,7 @@ const Login = () => {
 
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
-            Don't have an account? Contact your family administrator.
+            Demo accounts: parent1@example.com, child1@example.com
           </p>
         </div>
       </div>
@@ -206,6 +213,14 @@ const Navigation = () => {
               </svg>
             </div>
             <h1 className="text-xl font-bold text-gray-900">Family Planner</h1>
+            <div className="hidden sm:flex items-center space-x-2">
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                🤖 AI Ready
+              </span>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                🎤 Voice Ready
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center space-x-4">
@@ -251,6 +266,8 @@ const Dashboard = () => {
   const [showEventModal, setShowEventModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [stats, setStats] = useState(null);
+  const [showAIConfig, setShowAIConfig] = useState(false);
+  const [showVoiceConfig, setShowVoiceConfig] = useState(false);
 
   // Load dashboard stats
   useEffect(() => {
@@ -283,6 +300,18 @@ const Dashboard = () => {
 
   const getMemberById = (id) => familyMembers.find(m => m.id === id);
 
+  const handleVoiceCommand = (response) => {
+    console.log('Voice command result:', response);
+    // Refresh events if voice command created/modified events
+    loadEvents();
+  };
+
+  const handleAIOptimization = (result) => {
+    console.log('AI optimization result:', result);
+    // Refresh data after optimization
+    loadEvents();
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
@@ -293,64 +322,55 @@ const Dashboard = () => {
         <p className="text-gray-600">Here's what's happening with your family today.</p>
       </div>
 
-      {/* Stats Cards */}
+      {/* Enhanced Stats Cards */}
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="stats-card stats-card-total">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/80 text-sm font-medium">Total Events</p>
-                <p className="text-2xl font-bold text-white">{stats.total_events}</p>
-              </div>
-              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3a4 4 0 118 0v4m-4 8a2 2 0 100-4 2 2 0 000 4zm0 0v4a4 4 0 008 0v-4" />
-                </svg>
-              </div>
-            </div>
-          </div>
+          <EnhancedStatsCard
+            title="Total Events"
+            value={stats.total_events}
+            gradient="stats-card-total"
+            icon={
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3a4 4 0 118 0v4m-4 8a2 2 0 100-4 2 2 0 000 4zm0 0v4a4 4 0 008 0v-4" />
+              </svg>
+            }
+          />
 
-          <div className="stats-card stats-card-upcoming">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/80 text-sm font-medium">Upcoming</p>
-                <p className="text-2xl font-bold text-white">{stats.upcoming_events}</p>
-              </div>
-              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-          </div>
+          <EnhancedStatsCard
+            title="Upcoming"
+            value={stats.upcoming_events}
+            subtitle="Next 7 days"
+            gradient="stats-card-upcoming"
+            icon={
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+          />
 
-          <div className="stats-card stats-card-tasks">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/80 text-sm font-medium">Tasks</p>
-                <p className="text-2xl font-bold text-white">{stats.events_by_type?.task || 0}</p>
-              </div>
-              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-              </div>
-            </div>
-          </div>
+          <EnhancedStatsCard
+            title="AI Optimized"
+            value={stats.ai_optimized_count || 0}
+            subtitle={stats.ai_enabled ? "AI Active" : "AI Inactive"}
+            gradient="stats-card-tasks"
+            icon={
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+            }
+          />
 
-          <div className="stats-card stats-card-conflicts">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/80 text-sm font-medium">Conflicts</p>
-                <p className="text-2xl font-bold text-white">{stats.conflicts_count}</p>
-              </div>
-              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-            </div>
-          </div>
+          <EnhancedStatsCard
+            title="Conflicts"
+            value={stats.conflicts_count}
+            subtitle="Needs attention"
+            gradient="stats-card-conflicts"
+            icon={
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            }
+          />
         </div>
       )}
 
@@ -403,7 +423,12 @@ const Dashboard = () => {
                           }`}>
                             {event.priority}
                           </span>
-                          {event.conflicts.length > 0 && (
+                          {event.ai_optimized && (
+                            <span className="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-full">
+                              🤖 AI
+                            </span>
+                          )}
+                          {event.conflicts && event.conflicts.length > 0 && (
                             <span className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded-full">
                               Conflict
                             </span>
@@ -433,8 +458,47 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Upcoming Events Sidebar */}
+        {/* AI & Voice Features Sidebar */}
         <div className="space-y-6">
+          {/* AI Configuration */}
+          <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-2xl shadow-sm p-6 text-white">
+            <h3 className="text-lg font-semibold mb-2">🤖 AI Optimization</h3>
+            <p className="text-white/80 text-sm mb-4">
+              {stats?.ai_enabled ? 'AI scheduling optimization is active' : 'Configure AI for intelligent scheduling'}
+            </p>
+            <button
+              onClick={() => setShowAIConfig(true)}
+              className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200"
+            >
+              {stats?.ai_enabled ? 'AI Settings' : 'Configure AI'}
+            </button>
+          </div>
+
+          {/* Voice Configuration */}
+          <div className="bg-gradient-to-r from-blue-500 to-cyan-600 rounded-2xl shadow-sm p-6 text-white">
+            <h3 className="text-lg font-semibold mb-2">🎤 Voice Commands</h3>
+            <p className="text-white/80 text-sm mb-4">
+              {stats?.voice_enabled ? 'Voice commands are ready' : 'Configure voice input for hands-free scheduling'}
+            </p>
+            <button
+              onClick={() => setShowVoiceConfig(true)}
+              className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200"
+            >
+              {stats?.voice_enabled ? 'Voice Settings' : 'Configure Voice'}
+            </button>
+          </div>
+
+          {/* Voice Command Interface */}
+          <VoiceCommandInterface onVoiceCommand={handleVoiceCommand} />
+
+          {/* AI Optimization Panel */}
+          <AIOptimizationPanel 
+            events={events} 
+            familyMembers={familyMembers} 
+            onOptimize={handleAIOptimization}
+          />
+
+          {/* Upcoming Events */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Upcoming Events</h3>
             <div className="space-y-3">
@@ -459,19 +523,10 @@ const Dashboard = () => {
               )}
             </div>
           </div>
-
-          {/* AI Status Card */}
-          <div className="bg-gradient-to-r from-purple-500 to-indigo-600 rounded-2xl shadow-sm p-6 text-white">
-            <h3 className="text-lg font-semibold mb-2">AI Optimization</h3>
-            <p className="text-white/80 text-sm mb-4">Ready to configure intelligent scheduling</p>
-            <button className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200">
-              Configure AI
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Event Modal */}
+      {/* Modals */}
       {showEventModal && (
         <EventModal
           event={editingEvent}
@@ -486,6 +541,24 @@ const Dashboard = () => {
           }}
         />
       )}
+
+      <AIConfigurationModal
+        isOpen={showAIConfig}
+        onClose={() => setShowAIConfig(false)}
+        onSave={() => {
+          loadEvents();
+          setShowAIConfig(false);
+        }}
+      />
+
+      <VoiceConfigurationModal
+        isOpen={showVoiceConfig}
+        onClose={() => setShowVoiceConfig(false)}
+        onSave={() => {
+          loadEvents();
+          setShowVoiceConfig(false);
+        }}
+      />
     </div>
   );
 };
